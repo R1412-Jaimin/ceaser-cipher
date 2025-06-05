@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TACK Cipher Encrypt/Decrypt</title>
+<style>
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: #f0f0f0;
+    margin: 0; padding: 0;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    min-height: 100vh;
+  }
+  .container {
+    background: #2c2f4a;
+    margin: 2rem;
+    max-width: 600px;
+    width: 100%;
+    border-radius: 12px;
+    padding: 2rem;
+    box-shadow: 0 0 15px rgba(0,0,0,0.4);
+  }
+  h1 {
+    text-align: center;
+    margin-bottom: 1rem;
+    font-weight: 700;
+    color: #a1b8ff;
+  }
+  label {
+    display: block;
+    margin-top: 1rem;
+    font-weight: 600;
+  }
+  textarea, input[type=number] {
+    width: 100%;
+    margin-top: 0.3rem;
+    padding: 0.5rem;
+    border-radius: 6px;
+    border: none;
+    font-size: 1rem;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    resize: vertical;
+  }
+  .buttons {
+    margin-top: 1.5rem;
+    display: flex;
+    justify-content: space-around;
+  }
+  button {
+    cursor: pointer;
+    padding: 0.6rem 1.4rem;
+    font-size: 1rem;
+    border-radius: 8px;
+    border: none;
+    font-weight: 700;
+    background: #a1b8ff;
+    color: #2c2f4a;
+    transition: background 0.3s ease;
+  }
+  button:hover {
+    background: #8a9ee9;
+  }
+  .output {
+    margin-top: 1.5rem;
+    background: #1f2236;
+    padding: 1rem;
+    border-radius: 8px;
+    min-height: 3rem;
+    white-space: pre-wrap;
+    font-family: monospace;
+    font-size: 1rem;
+    color: #d1d9ff;
+  }
+  .footer {
+    margin-top: 2rem;
+    text-align: center;
+    font-size: 0.8rem;
+    color: #999bbb;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>TACK Cipher Encrypt & Decrypt</h1>
+    <label for="message">Input Message</label>
+    <textarea id="message" rows="4" placeholder="Enter your message here..."></textarea>
+
+    <label for="shift">Shift Value (integer between 0 and 4294967295)</label>
+    <input type="number" id="shift" placeholder="Enter shift value" min="0" max="4294967295" />
+
+    <div class="buttons">
+      <button id="encryptBtn">Encrypt</button>
+      <button id="decryptBtn">Decrypt</button>
+    </div>
+
+    <label>Output</label>
+    <pre id="output" class="output"></pre>
+
+    <div class="footer">
+      <p>Note: Shift value is used to derive TEA 128-bit key.</p>
+    </div>
+  </div>
+
+<script>
+  // TEA Encryption/Decryption Core Functions working on 64-bit blocks (two 32-bit uints)
+  function tea_encrypt(v, k) {
+    let v0 = v[0] >>> 0, v1 = v[1] >>> 0;
+    let k0 = k[0] >>> 0, k1 = k[1] >>> 0, k2 = k[2] >>> 0, k3 = k[3] >>> 0;
+    let sum = 0;
+    const delta = 0x9E3779B9 >>> 0;
+    for(let i=0; i<32; i++) {
+      sum = (sum + delta) >>> 0;
+      v0 = (v0 + ((((v1 << 4) >>> 0) + k0) ^ (v1 + sum) ^ (((v1 >>> 5) >>> 0) + k1))) >>> 0;
+      v1 = (v1 + ((((v0 << 4) >>> 0) + k2) ^ (v0 + sum) ^ (((v0 >>> 5) >>> 0) + k3))) >>> 0;
+    }
+    return [v0, v1];
+  }
+
+  function tea_decrypt(v, k) {
+    let v0 = v[0] >>> 0, v1 = v[1] >>> 0;
+    let k0 = k[0] >>> 0, k1 = k[1] >>> 0, k2 = k[2] >>> 0, k3 = k[3] >>> 0;
+    const delta = 0x9E3779B9 >>> 0;
+    let sum = (delta * 32) >>> 0;
+    for(let i=0; i<32; i++) {
+      v1 = (v1 - ((((v0 << 4) >>> 0) + k2) ^ (v0 + sum) ^ (((v0 >>> 5) >>> 0) + k3))) >>> 0;
+      v0 = (v0 - ((((v1 << 4) >>> 0) + k0) ^ (v1 + sum) ^ (((v1 >>> 5) >>> 0) + k1))) >>> 0;
+      sum = (sum - delta) >>> 0;
+    }
+    return [v0, v1];
+  }
+
+  
+  function stringToUint8Array(str) {
+    const encoder = new TextEncoder();
+    return encoder.encode(str);
+  }
+  function uint8ArrayToString(arr) {
+    const decoder = new TextDecoder();
+    return decoder.decode(arr);
+  }
+
+ 
+  function padUint8Array(arr) {
+    const padLen = (8 - (arr.length % 8)) % 8;
+    if(padLen === 0) return arr;
+    const padded = new Uint8Array(arr.length + padLen);
+    padded.set(arr);
+    return padded;
+  }
+
+  
+  function bytesToUint32(arr, offset) {
+    return (arr[offset] << 24) | (arr[offset+1] << 16) | (arr[offset+2] << 8) | arr[offset+3];
+  }
+
+
+  function uint32ToBytes(num, arr, offset) {
+    arr[offset] = (num >>> 24) & 0xFF;
+    arr[offset+1] = (num >>> 16) & 0xFF;
+    arr[offset+2] = (num >>> 8) & 0xFF;
+    arr[offset+3] = num & 0xFF;
+  }
+
+  
+  function prepareBlocks(str) {
+    let data = stringToUint8Array(str);
+    data = padUint8Array(data);
+    const blocks = [];
+    for(let i=0; i<data.length; i+=8) {
+      const v0 = bytesToUint32(data, i);
+      const v1 = bytesToUint32(data, i+4);
+      blocks.push([v0, v1]);
+    }
+    return blocks;
+  }
+
+ 
+  function blocksToUint8Array(blocks) {
+    const arr = new Uint8Array(blocks.length * 8);
+    for(let i=0; i<blocks.length; i++) {
+      uint32ToBytes(blocks[i][0], arr, i*8);
+      uint32ToBytes(blocks[i][1], arr, i*8 + 4);
+    }
+    return arr;
+  }
+
+ 
+  function deriveKey(shift) {
+    
+    const base = shift >>> 0;
+    return [
+      base,
+      ((base << 5) | (base >>> 27)) >>> 0,
+      ((base << 13) | (base >>> 19)) >>> 0,
+      ((base << 21) | (base >>> 11)) >>> 0
+    ];
+  }
+
+
+  function toHexString(arr) {
+    return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  
+  function fromHexString(hex) {
+    if(hex.length % 2 !== 0) throw new Error("Hex string length must be even");
+    const arr = new Uint8Array(hex.length / 2);
+    for(let i=0; i<arr.length; i++) {
+      arr[i] = parseInt(hex.substr(i*2,2),16);
+    }
+    return arr;
+  }
+
+
+  document.getElementById('encryptBtn').addEventListener('click', () => {
+    const message = document.getElementById('message').value;
+    const shiftRaw = document.getElementById('shift').value;
+    const outputEl = document.getElementById('output');
+
+    if(!message) {
+      outputEl.textContent = 'Please enter a message to encrypt.';
+      return;
+    }
+    const shift = Number(shiftRaw);
+    if(isNaN(shift) || shift < 0 || shift > 4294967295) {
+      outputEl.textContent = 'Shift value must be an integer between 0 and 4294967295.';
+      return;
+    }
+    const key = deriveKey(shift);
+    const blocks = prepareBlocks(message);
+    const encryptedBlocks = blocks.map(block => tea_encrypt(block, key));
+    const encryptedBytes = blocksToUint8Array(encryptedBlocks);
+  
+    outputEl.textContent = toHexString(encryptedBytes);
+  });
+
+  document.getElementById('decryptBtn').addEventListener('click', () => {
+    const encryptedHex = document.getElementById('message').value.trim();
+    const shiftRaw = document.getElementById('shift').value;
+    const outputEl = document.getElementById('output');
+
+    if(!encryptedHex) {
+      outputEl.textContent = 'Please enter a hex string to decrypt.';
+      return;
+    }
+    if(encryptedHex.length % 16 !== 0) {
+      outputEl.textContent = 'Invalid encrypted hex length: must be multiple of 16 characters.';
+      return;
+    }
+
+    const shift = Number(shiftRaw);
+    if(isNaN(shift) || shift < 0 || shift > 4294967295) {
+      outputEl.textContent = 'Shift value must be an integer between 0 and 4294967295.';
+      return;
+    }
+
+    let encryptedBytes;
+    try {
+      encryptedBytes = fromHexString(encryptedHex);
+    } catch (e) {
+      outputEl.textContent = 'Invalid hex string: ' + e.message;
+      return;
+    }
+
+    const key = deriveKey(shift);
+    const blocks = [];
+    for(let i=0; i<encryptedBytes.length; i+=8) {
+      const v0 = bytesToUint32(encryptedBytes, i);
+      const v1 = bytesToUint32(encryptedBytes, i+4);
+      blocks.push([v0, v1]);
+    }
+    const decryptedBlocks = blocks.map(block => tea_decrypt(block, key));
+    const decryptedBytes = blocksToUint8Array(decryptedBlocks);
+
+  
+    let end = decryptedBytes.length;
+    while(end > 0 && decryptedBytes[end-1] === 0) end--;
+    const messageBytes = decryptedBytes.slice(0, end);
+
+    try {
+      const message = uint8ArrayToString(messageBytes);
+      outputEl.textContent = message;
+    } catch {
+      outputEl.textContent = 'Decryption failed or invalid UTF-8 encoding.';
+    }
+  });
+</script>
+</body>
+</html>
+
